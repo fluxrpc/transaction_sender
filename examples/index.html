@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>Solana TX Sender</title>
+	<script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
+	<script>
+		
+		//TODO Fill in
+		const rpcEndpoint = ""
+		
+		async function connectAndSend() {
+			const provider = window.solana;
+			if (!provider || !provider.isPhantom) {
+				alert("Phantom wallet not found");
+				return;
+			}
+
+			// Connect wallet
+			const resp = await provider.connect();
+			const publicKey = new solanaWeb3.PublicKey(resp.publicKey.toString());
+
+			// Create simple transfer TX
+			const connection = new solanaWeb3.Connection(rpcEndpoint, "confirmed");
+			const recentBlockhash = await connection.getRecentBlockhash();
+
+			const tx = new solanaWeb3.Transaction({
+				feePayer: publicKey,
+				recentBlockhash: recentBlockhash.blockhash,
+			});
+
+			tx.add(
+				solanaWeb3.ComputeBudgetProgram.setComputeUnitLimit({units: 5_000}),
+				solanaWeb3.ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 500_000 }),
+				solanaWeb3.SystemProgram.transfer({
+					fromPubkey: publicKey,
+					toPubkey: publicKey,
+					lamports: 10000, // 0.00001 SOL to self
+				})
+			);
+
+			// Sign transaction
+			const signedTx = await provider.signTransaction(tx);
+			const serialized = signedTx.serialize();
+
+			// Send to QUIC via WASM
+			const postResp = await fetch("http://localhost:8080", {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/octet-stream",
+				},
+				body: serialized
+			});
+
+			if (postResp?.status !== 200) {
+				throw new Error("failed to send")
+			}
+		}
+	</script>
+</head>
+<body>
+<h1>Send 0.00001 SOL via TPU</h1>
+<button onclick="connectAndSend()">Connect Phantom & Send</button>
+</body>
+</html>
