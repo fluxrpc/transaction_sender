@@ -59,11 +59,15 @@ func (s *LeaderMonitor) Current(ctx context.Context, slotDiff uint64) (*Leader, 
 		return nil, err
 	}
 
-	l := s.getLeaderAtSlot(s.rpc.RelativeSlot(slot + slotDiff))
+	l := s.getLeaderAtSlot(s.RelativeSlot(slot + slotDiff))
 	if l == nil {
-		return nil, fmt.Errorf("leader not found for slot %v - relative: %v", slot, s.rpc.RelativeSlot(slot))
+		return nil, fmt.Errorf("leader not found for slot %v - relative: %v", slot, s.RelativeSlot(slot))
 	}
 
 	fmt.Println("Leader at slot ", slot+slotDiff, " - ", l.PubKey)
 	return l, nil
+}
+
+func (s *LeaderMonitor) RelativeSlot(slot uint64) uint64 {
+	return slot - (s.epochInfo.Result.AbsoluteSlot - s.epochInfo.Result.SlotIndex)
 }

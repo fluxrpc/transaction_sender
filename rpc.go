@@ -50,7 +50,7 @@ func (s *RPCService) LeaderSchedule(ctx context.Context, out interface{}) error 
 		"params":  []any{nil, map[string]string{"commitment": "confirmed"}},
 	})
 
-	return s.rpcRequest(ctx, bytes.NewBuffer(body), &s.leaderSchedule)
+	return s.rpcRequest(ctx, bytes.NewBuffer(body), out)
 }
 
 func (s *RPCService) ClusterNodes(ctx context.Context, out interface{}) error {
@@ -60,7 +60,7 @@ func (s *RPCService) ClusterNodes(ctx context.Context, out interface{}) error {
 		"method":  "getClusterNodes",
 	})
 
-	return s.rpcRequest(ctx, bytes.NewBuffer(body), &s.clusterNodes)
+	return s.rpcRequest(ctx, bytes.NewBuffer(body), out)
 }
 
 func (s *RPCService) EpochInfo(ctx context.Context, out interface{}) error {
@@ -70,7 +70,7 @@ func (s *RPCService) EpochInfo(ctx context.Context, out interface{}) error {
 		"method":  "getEpochInfo",
 	})
 
-	return s.rpcRequest(ctx, bytes.NewBuffer(body), &s.epochInfo)
+	return s.rpcRequest(ctx, bytes.NewBuffer(body), out)
 }
 
 func (s *RPCService) rpcRequest(ctx context.Context, reqData *bytes.Buffer, out any) error {
@@ -93,8 +93,4 @@ func (s *RPCService) rpcRequest(ctx context.Context, reqData *bytes.Buffer, out 
 	}
 
 	return nil
-}
-
-func (s *RPCService) RelativeSlot(slot uint64) uint64 {
-	return slot - (s.epochInfo.Result.AbsoluteSlot - s.epochInfo.Result.SlotIndex)
 }
