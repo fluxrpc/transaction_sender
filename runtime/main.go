@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"flag"
+	"fmt"
 	"github.com/alphabatem/solana_transaction_sender"
 	"io"
 	"log"
@@ -22,20 +24,32 @@ type runtime struct {
 }
 
 func (rt *runtime) run() error {
+	httpPortFlag := flag.String("http_port", "", "Port for HTTP server")
+	rpcURLFlag := flag.String("rpc_url", "", "RPC URL for Solana")
+	flag.Parse()
+
+	httpPort := os.Getenv("HTTP_PORT")
+	if httpPort == "" && *httpPortFlag != "" {
+		httpPort = *httpPortFlag
+	}
+	if httpPort == "" {
+		httpPort = "8080"
+	}
+
+	rpcURL := os.Getenv("RPC_URL")
+	if rpcURL == "" && *rpcURLFlag != "" {
+		rpcURL = *rpcURLFlag
+	}
+
 	var err error
 	rt.sts, err = solana_transaction_sender.NewTransactionSender(os.Getenv("RPC_URL"))
 	if err != nil {
 		return err
 	}
 
-	err = rt.sts.Load(context.TODO())
-	if err != nil {
-		return err
-	}
-
 	http.HandleFunc("/", rt.sendTransaction)
-	log.Println("Listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Printf("Listening on :%s", httpPort)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", httpPort), nil))
 	return nil
 }
 

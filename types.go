@@ -12,10 +12,10 @@ type getLeaderScheduleResponse struct {
 }
 
 type getClusterNodesResponse struct {
-	Result []*leader `json:"result"`
+	Result []*Leader `json:"result"`
 }
 
-type leader struct {
+type Leader struct {
 	PubKey          string `json:"pubkey"`
 	TPU             string `json:"tpu"`
 	TPUForwards     string `json:"tpuForwards"`
