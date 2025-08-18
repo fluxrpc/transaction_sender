@@ -5,8 +5,8 @@ import (
 	"flag"
 	"fmt"
 	"github.com/fluxrpc/transaction_sender"
+	"github.com/rs/zerolog/log"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"time"
@@ -15,7 +15,7 @@ import (
 func main() {
 	r := runtime{}
 	if err := r.run(); err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("Failed to start runtime")
 	}
 }
 
@@ -48,8 +48,9 @@ func (rt *runtime) run() error {
 	}
 
 	http.HandleFunc("/", rt.sendTransaction)
-	log.Printf("Listening on :%s", httpPort)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", httpPort), nil))
+	log.Info().Msgf("Listening on :%s", httpPort)
+
+	log.Fatal().Err(http.ListenAndServe(fmt.Sprintf(":%s", httpPort), nil)).Msg("Failed to start HTTPServer")
 	return nil
 }
 

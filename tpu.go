@@ -7,8 +7,8 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"fmt"
 	"github.com/quic-go/quic-go"
+	"github.com/rs/zerolog/log"
 	"math/big"
 	"net"
 	"time"
@@ -44,7 +44,7 @@ func (s *TPUService) PreConnect(ctx context.Context, quicEndpoint string) (*quic
 	tn := time.Now()
 	udpAddr, err := net.ResolveUDPAddr("udp", quicEndpoint)
 	if err != nil {
-		fmt.Println("UDP resolve error:", err)
+		log.Error().Err(err).Msg("TPUService::PreConnect error")
 		return nil, err
 	}
 
@@ -56,10 +56,11 @@ func (s *TPUService) PreConnect(ctx context.Context, quicEndpoint string) (*quic
 		},
 	}, &quic.Config{})
 	if err != nil {
-		fmt.Println("QUIC dial error:", err)
+		log.Error().Err(err).Msg("TPUService::PreConnect dial error")
 		return nil, err
 	}
-	fmt.Println("Dial took: ", time.Since(tn))
+
+	log.Trace().Msgf("Dial took: %s", time.Since(tn))
 	return conn, nil
 }
 
@@ -73,14 +74,14 @@ func (s *TPUService) _sendQUIC(ctx context.Context, quicEndpoint string, txBytes
 
 	stream, err := conn.OpenUniStreamSync(ctx)
 	if err != nil {
-		fmt.Println("Stream accept error:", err)
+		log.Error().Err(err).Msg("TPUService::_sendQUIC accept error")
 		return err
 	}
 	defer stream.Close()
 
 	_, err = stream.Write(txBytes)
 	if err != nil {
-		fmt.Println("Stream write error:", err)
+		log.Error().Err(err).Msg("TPUService::_sendQUIC write error")
 		return err
 	}
 	return nil
@@ -94,6 +95,7 @@ func (s *TPUService) _sendUDP(ctx context.Context, udpEndpoint string, txBytes [
 
 	conn, err := net.DialUDP("udp", nil, addr)
 	if err != nil {
+		log.Error().Err(err).Msg("TPUService::_sendUDP dial error")
 		return err
 	}
 	defer conn.Close()
@@ -102,7 +104,12 @@ func (s *TPUService) _sendUDP(ctx context.Context, udpEndpoint string, txBytes [
 	_ = conn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
 
 	_, err = conn.Write(txBytes)
-	return err
+	if err != nil {
+		log.Error().Err(err).Msg("TPUService::_sendUDP write error")
+		return err
+	}
+
+	return nil
 }
 
 func (s *TPUService) genSolanaCert() (tls.Certificate, error) {

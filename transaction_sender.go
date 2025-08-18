@@ -3,7 +3,7 @@ package transaction_sender
 import (
 	"context"
 	"errors"
-	"fmt"
+	"github.com/rs/zerolog/log"
 )
 
 type TransactionSender struct {
@@ -39,7 +39,7 @@ func NewTransactionSender(rpcEndpoint string) (*TransactionSender, error) {
 func (s *TransactionSender) Send(ctx context.Context, txBytes []byte) error {
 	l, err := s.leader.Current(ctx, 1) // N+1
 	if err != nil {
-		fmt.Println("Leader fetch error:", err)
+		log.Error().Err(err).Msg("TransactionSender::Send error")
 		return err
 	}
 

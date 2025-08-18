@@ -3,6 +3,8 @@ package transaction_sender
 import (
 	"context"
 	"fmt"
+	"github.com/rs/zerolog/log"
+	"time"
 )
 
 type LeaderMonitor struct {
@@ -16,6 +18,10 @@ type LeaderMonitor struct {
 }
 
 func (s *LeaderMonitor) Start() error {
+	return s.load()
+}
+
+func (s *LeaderMonitor) load() error {
 	ctx := context.TODO()
 
 	if err := s.rpc.EpochInfo(ctx, &s.epochInfo); err != nil {
@@ -32,6 +38,17 @@ func (s *LeaderMonitor) Start() error {
 
 	s.buildSlotMap()
 	return nil
+}
+
+func (s *LeaderMonitor) dataWorker() {
+	for {
+		time.Sleep(20 * time.Minute)
+		err := s.load() //Load new data
+		if err != nil {
+			log.Error().Err(err).Msg("LeaderMonitor::dataWorker error")
+		}
+
+	}
 }
 
 func (s *LeaderMonitor) getLeaderAtSlot(slot uint64) *Leader {
@@ -64,7 +81,7 @@ func (s *LeaderMonitor) Current(ctx context.Context, slotDiff uint64) (*Leader, 
 		return nil, fmt.Errorf("leader not found for slot %v - relative: %v", slot, s.RelativeSlot(slot))
 	}
 
-	fmt.Println("Leader at slot ", slot+slotDiff, " - ", l.PubKey)
+	log.Debug().Str("pk", l.PubKey).Uint64("slot", slot+slotDiff).Msg("LeaderMonitor::Current Leader")
 	return l, nil
 }
 

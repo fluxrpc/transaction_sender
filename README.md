@@ -1,10 +1,10 @@
-# Solana Transaction Sender
+# Transaction Sender
 
-Simple golang implementation for sending serialized transactions to SVM leaders with accurate leader tracking. 
+Simple golang implementation for sending serialized transactions to SVM (Solana/Fogo) leaders with accurate leader tracking. 
 
 Transactions are sent via both QUIC & UDP to the leader processing N+1 slot via accurate leader tracking. 
 
-For most use cases outside of TXN spam, users should be able to utilize this service over a hosted RPC solution as long as their tx flow is < SWQOS threshold. 
+For most use cases outside TXN spam, users should be able to utilize this service over a hosted RPC solution as long as their tx flow is < SWQOS threshold. 
 
 ## Supported Protocols
 * Solana
