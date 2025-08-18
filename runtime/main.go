@@ -4,7 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/fluxrpc/solana_transaction_sender"
+	"github.com/fluxrpc/transaction_sender"
 	"io"
 	"log"
 	"net/http"
@@ -20,7 +20,7 @@ func main() {
 }
 
 type runtime struct {
-	sts *solana_transaction_sender.TransactionSender
+	sts *transaction_sender.TransactionSender
 }
 
 func (rt *runtime) run() error {
@@ -42,7 +42,7 @@ func (rt *runtime) run() error {
 	}
 
 	var err error
-	rt.sts, err = solana_transaction_sender.NewTransactionSender(os.Getenv("RPC_URL"))
+	rt.sts, err = transaction_sender.NewTransactionSender(os.Getenv("RPC_URL"))
 	if err != nil {
 		return err
 	}

@@ -1,4 +1,4 @@
-module github.com/fluxrpc/solana_transaction_sender
+module github.com/fluxrpc/transaction_sender
 
 go 1.24.4
 

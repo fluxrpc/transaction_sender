@@ -1,4 +1,4 @@
-package solana_transaction_sender
+package transaction_sender
 
 import (
 	"bytes"
