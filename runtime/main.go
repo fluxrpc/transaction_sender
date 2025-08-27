@@ -5,17 +5,20 @@ import (
 	"flag"
 	"fmt"
 	"github.com/fluxrpc/transaction_sender"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"io"
-	"log"
 	"net/http"
 	"os"
 	"time"
 )
 
 func main() {
+	//zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+
 	r := runtime{}
 	if err := r.run(); err != nil {
-		log.Fatal(err)
+		log.Fatal().Err(err).Msg("Failed to start runtime")
 	}
 }
 
@@ -25,8 +28,15 @@ type runtime struct {
 
 func (rt *runtime) run() error {
 	httpPortFlag := flag.String("http_port", "", "Port for HTTP server")
-	rpcURLFlag := flag.String("rpc_url", "", "RPC URL for Solana")
+	rpcURLFlag := flag.String("rpc_url", "", "RPC URL")
+	wsURLFlag := flag.String("ws_url", "", "Websocket URL")
+	debug := flag.Bool("debug", false, "sets log level to debug")
 	flag.Parse()
+
+	zerolog.SetGlobalLevel(zerolog.InfoLevel)
+	if *debug {
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	}
 
 	httpPort := os.Getenv("HTTP_PORT")
 	if httpPort == "" && *httpPortFlag != "" {
@@ -41,15 +51,21 @@ func (rt *runtime) run() error {
 		rpcURL = *rpcURLFlag
 	}
 
+	wsURL := os.Getenv("WS_URL")
+	if wsURL == "" && *wsURLFlag != "" {
+		wsURL = *wsURLFlag
+	}
+
 	var err error
-	rt.sts, err = transaction_sender.NewTransactionSender(os.Getenv("RPC_URL"))
+	rt.sts, err = transaction_sender.NewTransactionSender(rpcURL, wsURL)
 	if err != nil {
 		return err
 	}
 
 	http.HandleFunc("/", rt.sendTransaction)
-	log.Printf("Listening on :%s", httpPort)
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", httpPort), nil))
+	log.Info().Msgf("Listening on :%s", httpPort)
+
+	log.Fatal().Err(http.ListenAndServe(fmt.Sprintf(":%s", httpPort), nil)).Msg("Failed to start HTTPServer")
 	return nil
 }
 

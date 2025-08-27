@@ -24,7 +24,18 @@ type Leader struct {
 }
 
 type epochInfo struct {
+	Epoch        uint64 `json:"epoch"`
 	SlotIndex    uint64 `json:"slotIndex"`
 	AbsoluteSlot uint64 `json:"absoluteSlot"`
 	SlotsInEpoch uint64 `json:"slotsInEpoch"`
+}
+
+type SlotMessage struct {
+	Params struct {
+		Result struct {
+			Parent uint64 `json:"parent"`
+			Slot   uint64 `json:"slot"`
+		} `json:"result"`
+		Subscription uint64 `json:"subscription"`
+	} `json:"params"`
 }
