@@ -3,11 +3,14 @@ module github.com/fluxrpc/transaction_sender
 go 1.24.4
 
 require (
+	github.com/gobwas/ws v1.4.0
 	github.com/quic-go/quic-go v0.54.0
 	github.com/rs/zerolog v1.34.0
 )
 
 require (
+	github.com/gobwas/httphead v0.1.0 // indirect
+	github.com/gobwas/pool v0.2.1 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	go.uber.org/mock v0.5.0 // indirect

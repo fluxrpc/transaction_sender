@@ -10,15 +10,50 @@ import (
 type LeaderMonitor struct {
 	rpc *RPCService
 
-	epochInfo      getEpochInfoResponse
-	clusterNodes   getClusterNodesResponse
-	leaderSchedule getLeaderScheduleResponse
+	onUpcomingLeader func(currentSlot uint64, leaderSlot uint64, leader *Leader)
+
+	epochInfo    *getEpochInfoResponse
+	clusterNodes *getClusterNodesResponse
+
+	leaderSchedule     *getLeaderScheduleResponse
+	nextLeaderSchedule *getLeaderScheduleResponse
 
 	slotToLeader map[uint64]*Leader
+
+	nextLeaderG *Leader
+
+	onSlot      chan uint64
+	currentSlot uint64
 }
 
 func (s *LeaderMonitor) Start() error {
-	return s.load()
+	tn := time.Now()
+
+	err := s.load()
+	if err != nil {
+		return err
+	}
+	log.Debug().Msgf("LeaderMonitor::load took: %s", time.Since(tn))
+
+	s.onSlot = make(chan uint64, 10)
+	err = s.rpc.wsSlotSubscription(s.onSlot)
+	if err != nil {
+		return err
+	}
+
+	go s.slotWorker()
+
+	return nil
+}
+
+func (s *LeaderMonitor) rotateSchedule() error {
+
+	s.leaderSchedule = s.nextLeaderSchedule
+	s.buildSlotMap()
+
+	go s.load() //Async fetch data for next epoch
+
+	return nil
 }
 
 func (s *LeaderMonitor) load() error {
@@ -27,27 +62,55 @@ func (s *LeaderMonitor) load() error {
 	if err := s.rpc.EpochInfo(ctx, &s.epochInfo); err != nil {
 		return err
 	}
-
-	if err := s.rpc.LeaderSchedule(ctx, &s.leaderSchedule); err != nil {
-		return err
-	}
+	log.Info().Uint64("epoch", s.epochInfo.Result.Epoch).Msg("Epoch Loaded")
 
 	if err := s.rpc.ClusterNodes(ctx, &s.clusterNodes); err != nil {
 		return err
 	}
+	log.Info().Int("node_count", len(s.clusterNodes.Result)).Msg("ClusterNodes Loaded")
+
+	//Only load leader schedule once as it is populated from nextLeaderSchedule on rotation of epoch
+	if s.leaderSchedule == nil {
+		if err := s.rpc.LeaderSchedule(ctx, nil, &s.leaderSchedule); err != nil {
+			return err
+		}
+		log.Info().Uint64("epoch", s.epochInfo.Result.Epoch).Int("leader_count", len(s.leaderSchedule.Result)).Msg("LeaderSchedule Loaded")
+	}
+
+	nextEpoch := s.epochInfo.Result.AbsoluteSlot + s.epochInfo.Result.SlotsInEpoch
+	if err := s.rpc.LeaderSchedule(ctx, &nextEpoch, &s.nextLeaderSchedule); err != nil {
+		return err
+	}
+	log.Info().Uint64("epoch", s.epochInfo.Result.Epoch+1).Int("leader_count", len(s.nextLeaderSchedule.Result)).Msg("Next LeaderSchedule Loaded")
 
 	s.buildSlotMap()
 	return nil
 }
 
-func (s *LeaderMonitor) dataWorker() {
-	for {
-		time.Sleep(20 * time.Minute)
-		err := s.load() //Load new data
-		if err != nil {
-			log.Error().Err(err).Msg("LeaderMonitor::dataWorker error")
+func (s *LeaderMonitor) slotWorker() {
+	for slot := range s.onSlot {
+		s.currentSlot = s.RelativeSlot(slot)
+		if s.currentSlot == 0 {
+			log.Debug().Msg("LeaderMonitor::slotWorker ROTATE_EPOCH")
+			_ = s.rotateSchedule()
 		}
 
+		atSlot, nextLeader := s.nextLeader(s.currentSlot)
+		if nextLeader == nil {
+			continue
+		}
+
+		if s.nextLeaderG != nil && nextLeader.PubKey == s.nextLeaderG.PubKey {
+			if s.onUpcomingLeader != nil {
+				go s.onUpcomingLeader(s.currentSlot, atSlot, nextLeader)
+			}
+			continue
+		}
+		// New Leader
+
+		s.nextLeaderG = nextLeader
+
+		log.Trace().Uint64("slot", s.currentSlot).Uint64("leader_slot", atSlot).Str("pk", nextLeader.PubKey).Msgf("LeaderMonitor::slotWorker NextLeader in: %v", atSlot-s.currentSlot)
 	}
 }
 
@@ -67,22 +130,41 @@ func (s *LeaderMonitor) buildSlotMap() {
 			s.slotToLeader[slot] = lMap[l] //Bind addr to Leader ref
 		}
 	}
-
 }
 
-func (s *LeaderMonitor) Current(ctx context.Context, slotDiff uint64) (*Leader, error) {
-	slot, err := s.rpc.Slot(ctx)
-	if err != nil {
-		return nil, err
+func (s *LeaderMonitor) nextLeader(slot uint64) (uint64, *Leader) {
+	current := s.slotToLeader[slot]
+	if current == nil {
+		return 0, nil
 	}
 
-	l := s.getLeaderAtSlot(s.RelativeSlot(slot + slotDiff))
+	for i := slot; i < uint64(len(s.slotToLeader)); i++ {
+		l := s.slotToLeader[i]
+		if l == nil {
+			log.Warn().Uint64("slot", i).Msg("Leader not found in slot map")
+			continue
+		}
+
+		if l.PubKey != current.PubKey {
+			return i, l
+		}
+	}
+
+	for ls, l := range s.slotToLeader {
+		if l.PubKey != current.PubKey {
+			return ls, l
+		}
+	}
+	return 0, nil
+}
+
+func (s *LeaderMonitor) Current(slotDiff uint64) (*Leader, uint64, error) {
+	l := s.getLeaderAtSlot(s.currentSlot + slotDiff)
 	if l == nil {
-		return nil, fmt.Errorf("leader not found for slot %v - relative: %v", slot, s.RelativeSlot(slot))
+		return nil, 0, fmt.Errorf("leader not found for slot %v", s.currentSlot+slotDiff)
 	}
 
-	log.Debug().Str("pk", l.PubKey).Uint64("slot", slot+slotDiff).Msg("LeaderMonitor::Current Leader")
-	return l, nil
+	return l, s.currentSlot + slotDiff + (s.epochInfo.Result.AbsoluteSlot - s.epochInfo.Result.SlotIndex), nil
 }
 
 func (s *LeaderMonitor) RelativeSlot(slot uint64) uint64 {
