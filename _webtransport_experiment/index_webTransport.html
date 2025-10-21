@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>Solana TX Sender - WebTransport</title>
+	<script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
+	<script src="solanaTransactionSender.js"></script>
+</head>
+<body style="text-align: center; background: gray; font-family: monospace">
+<h1>Send 0.00001 SOL via TPU</h1>
+
+
+
+<div style="display: flex; justify-content: space-evenly;">
+	<div>
+		<p>RPC URL is only used to fetch leader schedule etc.</p>
+		
+		<label for="rpc_url">RPC URL: </label><input type="url" id="rpc_url">
+		<button onclick="setRPCUrl()">SET RPC URL</button>
+	</div>
+	
+	<div>
+		
+		<p>OR Set a specific leader to send too (include port)</p>
+		
+		<label for="rpc_url">RPC URL: </label><input type="url" id="custom_leader">
+		<button onclick="setCustomLeader()">SET SPECIFIC LEADER</button>
+		<button onclick="clearCustomLeader()">CLEAR</button>
+	</div>
+</div>
+
+
+<br>
+
+<br>
+<br>
+
+
+
+<br>
+<br>
+
+<button onclick="connectAndSend()">Connect Phantom & Send</button>
+
+
+<script>
+	const rpcURL = localStorage.getItem("RPC_URL")
+	const customLeader = localStorage.getItem("CUSTOM_LEADER")
+	
+	const transport = new SolanaTransactionSender(rpcURL)
+
+	async function connectAndSend() {
+		const provider = window.solana;
+		if (!provider || !provider.isPhantom) {
+			alert("Phantom wallet not found");
+			return;
+		}
+
+		// Connect wallet
+		const resp = await provider.connect();
+		const publicKey = new solanaWeb3.PublicKey(resp.publicKey.toString());
+
+		// Create simple transfer TX
+		const connection = new solanaWeb3.Connection(rpcURL, "confirmed");
+		const recentBlockhash = await connection.getRecentBlockhash();
+
+		const tx = new solanaWeb3.Transaction({
+			feePayer: publicKey,
+			recentBlockhash: recentBlockhash.blockhash,
+		});
+
+		tx.add(
+			solanaWeb3.SystemProgram.transfer({
+				fromPubkey: publicKey,
+				toPubkey: publicKey,
+				lamports: 10000, // 0.00001 SOL to self
+			})
+		);
+
+		// Sign transaction
+		const signedTx = await provider.signTransaction(tx);
+		const serialized = signedTx.serialize();
+		
+		transport.sendTransaction(serialized, customLeader).then(r => {
+			console.log("Txn sent", r)
+			alert(`TXN SENT: ${signedTx.signatures[0]}`)
+		}).catch(e => {
+			console.error("Failed to send txn", e)
+			alert(`Failed to send TXN: ${e}`)
+		})
+	}
+
+	function setRPCUrl() {
+		localStorage.setItem("RPC_URL", document.getElementById("rpc_url").value)
+		window.location.reload()
+	}
+
+	function setCustomLeader() {
+		let val = document.getElementById("custom_leader").value
+		if (val.indexOf("http") === -1) {
+			val = `https://${val}`
+		}
+		
+		localStorage.setItem("CUSTOM_LEADER", val)
+		window.location.reload()
+	}
+
+	function clearCustomLeader() {
+		localStorage.removeItem("CUSTOM_LEADER")
+		window.location.reload()
+	}
+</script>
+
+<script>
+	document.getElementById("rpc_url").value = localStorage.getItem("RPC_URL")
+	document.getElementById("custom_leader").value = localStorage.getItem("CUSTOM_LEADER")
+</script>
+</body>
+</html>
