@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="UTF-8">
+	<title>Solana TX Sender (No Web3.js)</title>
+	<script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
+	<script src="wasm_exec.js"></script>
+	<script>
+		const go = new Go();
+		const rpcURL = "{RPC_URL}"
+
+		WebAssembly.instantiateStreaming(fetch("../transaction_sender.wasm"), go.importObject).then((result) => {
+			go.run(result.instance);
+			
+			let err = initializeTransactionSender(rpcURL)
+			console.log("initializeTransactionSender", err)
+			
+			window.transactionSender = sendTransaction;
+		});
+
+		async function connectAndSend() {
+			const provider = window.solana;
+			if (!provider || !provider.isPhantom) {
+				alert("Phantom wallet not found");
+				return;
+			}
+
+			// Connect wallet
+			const resp = await provider.connect();
+			const publicKey = new solanaWeb3.PublicKey(resp.publicKey.toString());
+
+			// Create simple transfer TX
+			const connection = new solanaWeb3.Connection(rpcURL, "confirmed");
+			const recentBlockhash = await connection.getRecentBlockhash();
+
+			const tx = new solanaWeb3.Transaction({
+				feePayer: publicKey,
+				recentBlockhash: recentBlockhash.blockhash,
+			});
+
+			tx.add(
+				solanaWeb3.SystemProgram.transfer({
+					fromPubkey: publicKey,
+					toPubkey: publicKey,
+					lamports: 10000, // 0.00001 SOL to self
+				})
+			);
+
+			// Sign transaction
+			const signedTx = await provider.signTransaction(tx);
+			const serialized = signedTx.serialize();
+
+			// Send to QUIC via WASM
+			window.transactionSender(serialized);
+		}
+	</script>
+</head>
+<body>
+<h1>Send 0.00001 SOL via TPU</h1>
+<button onclick="connectAndSend()">Connect Phantom & Send</button>
+</body>
+</html>
