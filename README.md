@@ -1,58 +1,103 @@
-# Transaction Sender
+# transaction_sender
 
-Simple golang implementation for sending serialized transactions to SVM (Solana/Fogo) leaders with accurate leader tracking. 
+[![Go Reference](https://pkg.go.dev/badge/github.com/fluxrpc/transaction_sender.svg)](https://pkg.go.dev/github.com/fluxrpc/transaction_sender)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Transactions are sent via both QUIC & UDP to the leader processing N+1 slot via accurate leader tracking. During a leader handoff the current leader is also targeted while it can still receive the packet in time — half its measured RTT (learned from QUIC handshakes, EWMA-smoothed) plus a small guard must fit in the slot's remaining time. Slot duration is learned from live slot notifications, with 200ms used only as the startup fallback.
+A direct-to-leader transaction sender for Solana-compatible SVM chains. It tracks current and upcoming leaders, preconnects to validator TPU endpoints, and sends serialized transactions over UDP and QUIC with RTT-aware leader handoffs.
 
-For most use cases outside TXN spam, users should be able to utilize this service over a hosted RPC solution as long as their tx flow is < SWQOS threshold. 
+Development is sponsored and maintained by **[FluxRPC](https://fluxrpc.com)** — Solana & Fogo RPC infrastructure.
 
-## Supported Protocols
-* Solana
-* Fogo
+- RPC requests, response types, and WebSocket subscriptions are powered by [fluxrpc/solana-go](https://github.com/fluxrpc/solana-go).
+- Current and next-epoch leader schedules are loaded from the configured RPC endpoint.
+- Upcoming QUIC connections are warmed before a leader rotation.
+- QUIC handshake RTTs are EWMA-smoothed per validator endpoint.
+- Slot duration is learned from live notifications, with 200ms used only as the startup fallback.
+- The next-slot leader is always targeted; the current leader is also targeted while its estimated one-way delay still fits.
 
-## Features
- * [x] Leader tracking
- * [x] QUIC Support
- * [x] UDP Support
- * [x] RTT-aware leader rotation
+The sender performs no RPC preflight or confirmation. Direct TPU delivery is intended for latency-sensitive callers that already simulate, retry, and confirm their transactions. Delivery through an unstaked connection remains subject to validator SWQoS policy.
 
-### Upcoming
-* [ ] Jito detection
-* [ ] Whitelist validator set
-
-
-## Setup
-
-### Environment
-To run the transaction sender simply provide it via env or flags
-
-```env
-HTTP_PORT=8080
-RPC_URL={RPC_ENDPOINT}
-WS_URL={RPC_WS_ENDPOINT}
-```
-
-### Flags
-* `http_port` - HTTP port to serve the endpoints on 
-* `rpc_url` - RPC URL used to query for leader & slot detail
-* `ws_url` - RPC Websocket URL for inbound slot data
-
-
-## Build
-
-### Docker
-* Deploy via the supported `Dockerfile`
-* Connect to transaction sender via exposed port
-
-### Source
+## Install
 
 ```bash
-GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -ldflags='-s -w -extldflags "-static"' -o txn_worker ./runtime/main.go -o transaction_sender
+go get github.com/fluxrpc/transaction_sender
+go get github.com/fluxrpc/solana-go
 ```
 
+## Quickstart
+
+```go
+import (
+	"context"
+	"time"
+
+	solana "github.com/fluxrpc/solana-go"
+	sender "github.com/fluxrpc/transaction_sender"
+)
+
+func send(ctx context.Context, tx *solana.Transaction) error {
+	client, err := sender.NewTransactionSender(
+		"https://your-rpc-endpoint",
+		"wss://your-rpc-endpoint",
+	)
+	if err != nil {
+		return err
+	}
+
+	raw, err := tx.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	return client.Send(ctx, raw)
+}
+```
+
+## HTTP service
+
+The included runtime accepts a serialized transaction in the body of `POST /`.
+
+| Environment | Flag | Purpose | Default |
+|---|---|---|---|
+| `RPC_URL` | `-rpc_url` | JSON-RPC endpoint for epoch, cluster, and schedule data | required |
+| `WS_URL` | `-ws_url` | WebSocket endpoint for processed slot notifications | required |
+| `HTTP_PORT` | `-http_port` | HTTP listen port | `8080` |
+| — | `-debug` | Enable debug logging | `false` |
+
+Run from source:
+
+```bash
+go run ./runtime -rpc_url https://your-rpc -ws_url wss://your-rpc
+curl --fail --data-binary @transaction.bin http://127.0.0.1:8080/
+```
+
+Build a static binary:
+
+```bash
+CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o transaction-sender ./runtime
+```
+
+Or build the included container:
+
+```bash
+docker build -t transaction-sender .
+docker run --rm -p 8080:8080 \
+  -e RPC_URL=https://your-rpc \
+  -e WS_URL=wss://your-rpc \
+  transaction-sender
+```
+
+## Supported chains
+
+- Solana
+- Fogo
+
+Chains with different slot timing can use the same schedule-driven sender; transaction size and validator transport support remain chain-specific.
 
 ## Development
 
 ```bash
-go run ./runtime/main.go --rpc_url {RPC_URL}
+go test ./...
+go test -race ./...
+go vet ./...
 ```
