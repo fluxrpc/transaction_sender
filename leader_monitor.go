@@ -4,7 +4,16 @@ import (
 	"context"
 	"fmt"
 	"github.com/rs/zerolog/log"
+	"sync"
 	"time"
+)
+
+const (
+	defaultSlotDuration = 200 * time.Millisecond
+	rotationGuard       = 25 * time.Millisecond
+	defaultRTT          = 100 * time.Millisecond
+	minSlotDuration     = 25 * time.Millisecond
+	maxSlotDuration     = 2 * time.Second
 )
 
 type LeaderMonitor struct {
@@ -19,11 +28,18 @@ type LeaderMonitor struct {
 	nextLeaderSchedule *getLeaderScheduleResponse
 
 	slotToLeader map[uint64]*Leader
+	muSchedule   sync.RWMutex
 
 	nextLeaderG *Leader
 
-	onSlot      chan uint64
-	currentSlot uint64
+	onSlot        chan uint64
+	currentSlot   uint64
+	slotStartedAt time.Time
+
+	muSlot                sync.RWMutex
+	lastAbsoluteSlot      uint64
+	hasSlotObservation    bool
+	estimatedSlotDuration time.Duration
 }
 
 func (s *LeaderMonitor) Start() error {
@@ -89,20 +105,21 @@ func (s *LeaderMonitor) load() error {
 
 func (s *LeaderMonitor) slotWorker() {
 	for slot := range s.onSlot {
-		s.currentSlot = s.RelativeSlot(slot)
-		if s.currentSlot == 0 {
+		currentSlot := s.RelativeSlot(slot)
+		s.observeSlotTiming(slot, currentSlot, time.Now())
+		if currentSlot == 0 {
 			log.Debug().Msg("LeaderMonitor::slotWorker ROTATE_EPOCH")
 			_ = s.rotateSchedule()
 		}
 
-		atSlot, nextLeader := s.nextLeader(s.currentSlot)
+		atSlot, nextLeader := s.nextLeader(currentSlot)
 		if nextLeader == nil {
 			continue
 		}
 
 		if s.nextLeaderG != nil && nextLeader.PubKey == s.nextLeaderG.PubKey {
 			if s.onUpcomingLeader != nil {
-				go s.onUpcomingLeader(s.currentSlot, atSlot, nextLeader)
+				go s.onUpcomingLeader(currentSlot, atSlot, nextLeader)
 			}
 			continue
 		}
@@ -110,11 +127,38 @@ func (s *LeaderMonitor) slotWorker() {
 
 		s.nextLeaderG = nextLeader
 
-		log.Trace().Uint64("slot", s.currentSlot).Uint64("leader_slot", atSlot).Str("pk", nextLeader.PubKey).Msgf("LeaderMonitor::slotWorker NextLeader in: %v", atSlot-s.currentSlot)
+		log.Trace().Uint64("slot", currentSlot).Uint64("leader_slot", atSlot).Str("pk", nextLeader.PubKey).Msgf("LeaderMonitor::slotWorker NextLeader in: %v", atSlot-currentSlot)
 	}
 }
 
+func (s *LeaderMonitor) observeSlotTiming(absoluteSlot uint64, relativeSlot uint64, observedAt time.Time) {
+	s.muSlot.Lock()
+	defer s.muSlot.Unlock()
+
+	if s.hasSlotObservation && absoluteSlot <= s.lastAbsoluteSlot {
+		return
+	}
+	if s.hasSlotObservation {
+		delta := absoluteSlot - s.lastAbsoluteSlot
+		sample := observedAt.Sub(s.slotStartedAt) / time.Duration(delta)
+		if sample >= minSlotDuration && sample <= maxSlotDuration {
+			if s.estimatedSlotDuration == 0 {
+				s.estimatedSlotDuration = sample
+			} else {
+				s.estimatedSlotDuration = (4*s.estimatedSlotDuration + sample) / 5
+			}
+		}
+	}
+
+	s.currentSlot = relativeSlot
+	s.slotStartedAt = observedAt
+	s.lastAbsoluteSlot = absoluteSlot
+	s.hasSlotObservation = true
+}
+
 func (s *LeaderMonitor) getLeaderAtSlot(slot uint64) *Leader {
+	s.muSchedule.RLock()
+	defer s.muSchedule.RUnlock()
 	return s.slotToLeader[slot]
 }
 
@@ -124,15 +168,20 @@ func (s *LeaderMonitor) buildSlotMap() {
 		lMap[n.PubKey] = n
 	}
 
-	s.slotToLeader = make(map[uint64]*Leader)
+	slotToLeader := make(map[uint64]*Leader)
 	for l, slots := range s.leaderSchedule.Result {
 		for _, slot := range slots {
-			s.slotToLeader[slot] = lMap[l] //Bind addr to Leader ref
+			slotToLeader[slot] = lMap[l] //Bind addr to Leader ref
 		}
 	}
+	s.muSchedule.Lock()
+	s.slotToLeader = slotToLeader
+	s.muSchedule.Unlock()
 }
 
 func (s *LeaderMonitor) nextLeader(slot uint64) (uint64, *Leader) {
+	s.muSchedule.RLock()
+	defer s.muSchedule.RUnlock()
 	current := s.slotToLeader[slot]
 	if current == nil {
 		return 0, nil
@@ -159,12 +208,46 @@ func (s *LeaderMonitor) nextLeader(slot uint64) (uint64, *Leader) {
 }
 
 func (s *LeaderMonitor) Current(slotDiff uint64) (*Leader, uint64, error) {
-	l := s.getLeaderAtSlot(s.currentSlot + slotDiff)
+	s.muSlot.RLock()
+	currentSlot := s.currentSlot
+	s.muSlot.RUnlock()
+	l := s.getLeaderAtSlot(currentSlot + slotDiff)
 	if l == nil {
-		return nil, 0, fmt.Errorf("leader not found for slot %v", s.currentSlot+slotDiff)
+		return nil, 0, fmt.Errorf("leader not found for slot %v", currentSlot+slotDiff)
 	}
 
-	return l, s.currentSlot + slotDiff + (s.epochInfo.Result.AbsoluteSlot - s.epochInfo.Result.SlotIndex), nil
+	return l, currentSlot + slotDiff + (s.epochInfo.Result.AbsoluteSlot - s.epochInfo.Result.SlotIndex), nil
+}
+
+// sendTargets returns the leaders to send to right now: always the N+1 leader,
+// plus the current leader while half its RTT still fits in the slot's remaining time.
+func (s *LeaderMonitor) sendTargets(tpu *TPUService, now time.Time) []*Leader {
+	s.muSlot.RLock()
+	currentSlot := s.currentSlot
+	slotStartedAt := s.slotStartedAt
+	slotDuration := s.estimatedSlotDuration
+	s.muSlot.RUnlock()
+	if slotDuration == 0 {
+		slotDuration = defaultSlotDuration
+	}
+
+	current := s.getLeaderAtSlot(currentSlot)
+	next := s.getLeaderAtSlot(currentSlot + 1)
+	if next == nil {
+		if current == nil {
+			return nil
+		}
+		return []*Leader{current}
+	}
+	if current == nil || current.PubKey == next.PubKey {
+		return []*Leader{next}
+	}
+
+	remaining := slotDuration - now.Sub(slotStartedAt)
+	if tpu.RTT(current)/2+rotationGuard < remaining {
+		return []*Leader{current, next}
+	}
+	return []*Leader{next}
 }
 
 func (s *LeaderMonitor) RelativeSlot(slot uint64) uint64 {
