@@ -2,7 +2,7 @@
 
 Simple golang implementation for sending serialized transactions to SVM (Solana/Fogo) leaders with accurate leader tracking. 
 
-Transactions are sent via both QUIC & UDP to the leader processing N+1 slot via accurate leader tracking. 
+Transactions are sent via both QUIC & UDP to the leader processing N+1 slot via accurate leader tracking. During a leader handoff the current leader is also targeted while it can still receive the packet in time — half its measured RTT (learned from QUIC handshakes, EWMA-smoothed) plus a small guard must fit in the slot's remaining time. Slot duration is learned from live slot notifications, with 200ms used only as the startup fallback.
 
 For most use cases outside TXN spam, users should be able to utilize this service over a hosted RPC solution as long as their tx flow is < SWQOS threshold. 
 
@@ -14,11 +14,11 @@ For most use cases outside TXN spam, users should be able to utilize this servic
  * [x] Leader tracking
  * [x] QUIC Support
  * [x] UDP Support
+ * [x] RTT-aware leader rotation
 
 ### Upcoming
 * [ ] Jito detection
 * [ ] Whitelist validator set
-* [ ] Pre-connect latency
 
 
 ## Setup
