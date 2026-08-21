@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/rs/zerolog/log"
+	"sync"
 	"time"
 )
 
@@ -60,9 +61,16 @@ func (s *TransactionSender) Send(ctx context.Context, txBytes []byte) error {
 		return err
 	}
 
-	for _, l := range targets {
-		log.Info().Str("leader", l.PubKey).Msg("Sending Txn")
-		_ = s.tpu.Send(ctx, l, txBytes)
+	var sends sync.WaitGroup
+	sends.Add(len(targets))
+	for _, target := range targets {
+		leader := target
+		go func() {
+			defer sends.Done()
+			log.Info().Str("leader", leader.PubKey).Msg("Sending Txn")
+			_ = s.tpu.Send(ctx, leader, txBytes)
+		}()
 	}
+	sends.Wait()
 	return nil
 }

@@ -162,6 +162,12 @@ func (s *LeaderMonitor) getLeaderAtSlot(slot uint64) *Leader {
 	return s.slotToLeader[slot]
 }
 
+func (s *LeaderMonitor) leadersAtSlots(currentSlot uint64) (*Leader, *Leader) {
+	s.muSchedule.RLock()
+	defer s.muSchedule.RUnlock()
+	return s.slotToLeader[currentSlot], s.slotToLeader[currentSlot+1]
+}
+
 func (s *LeaderMonitor) buildSlotMap() {
 	lMap := make(map[string]*Leader, len(s.clusterNodes.Result))
 	for _, n := range s.clusterNodes.Result {
@@ -231,8 +237,7 @@ func (s *LeaderMonitor) sendTargets(tpu *TPUService, now time.Time) []*Leader {
 		slotDuration = defaultSlotDuration
 	}
 
-	current := s.getLeaderAtSlot(currentSlot)
-	next := s.getLeaderAtSlot(currentSlot + 1)
+	current, next := s.leadersAtSlots(currentSlot)
 	if next == nil {
 		if current == nil {
 			return nil
