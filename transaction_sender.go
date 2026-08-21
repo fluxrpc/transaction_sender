@@ -3,7 +3,10 @@ package transaction_sender
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/rs/zerolog/log"
+	"sync"
+	"time"
 )
 
 type TransactionSender struct {
@@ -51,12 +54,23 @@ func NewTransactionSender(rpcEndpoint string, websocketEndpoint string) (*Transa
 }
 
 func (s *TransactionSender) Send(ctx context.Context, txBytes []byte) error {
-	l, leaderSlot, err := s.leader.Current(1) // N+1
-	if err != nil {
+	targets := s.leader.sendTargets(s.tpu, time.Now())
+	if len(targets) == 0 {
+		err := fmt.Errorf("leader not found for current or next slot")
 		log.Error().Err(err).Msg("TransactionSender::Send error")
 		return err
 	}
 
-	log.Info().Str("leader", l.PubKey).Uint64("slot", leaderSlot).Msg("Sending Txn")
-	return s.tpu.Send(ctx, l, txBytes)
+	var sends sync.WaitGroup
+	sends.Add(len(targets))
+	for _, target := range targets {
+		leader := target
+		go func() {
+			defer sends.Done()
+			log.Info().Str("leader", leader.PubKey).Msg("Sending Txn")
+			_ = s.tpu.Send(ctx, leader, txBytes)
+		}()
+	}
+	sends.Wait()
+	return nil
 }

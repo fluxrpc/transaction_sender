@@ -35,6 +35,9 @@ type TPUService struct {
 
 	connecting map[string]struct{}
 	muConnect  *sync.RWMutex
+
+	rtts  map[string]time.Duration
+	muRTT sync.RWMutex
 }
 
 func (s *TPUService) Start() error {
@@ -43,6 +46,8 @@ func (s *TPUService) Start() error {
 
 	s.connecting = map[string]struct{}{}
 	s.muConnect = &sync.RWMutex{}
+
+	s.rtts = map[string]time.Duration{}
 
 	s.cert, _ = s.genSolanaCert()
 
@@ -58,9 +63,9 @@ func (s *TPUService) Send(ctx context.Context, l *Leader, txBytes []byte) error 
 }
 
 func (s *TPUService) Connect(ctx context.Context, leader *Leader) (*quic.Conn, error) {
-	//if c := s.cachedConn(quicEndpoint); c != nil {
-	//	return c, nil
-	//}
+	if c := s.cachedConn(leader.TPUQuic); c != nil {
+		return c, nil
+	}
 
 	if s.isConnecting(leader.TPUQuic) {
 		return nil, errors.New("connection not ready")
@@ -84,13 +89,13 @@ func (s *TPUService) connect(ctx context.Context, l *Leader) (*quic.Conn, error)
 	s.setConnecting(l.TPUQuic, true)
 	defer s.setConnecting(l.TPUQuic, false)
 
-	tn := time.Now()
 	udpAddr, err := net.ResolveUDPAddr("udp", l.TPUQuic)
 	if err != nil {
 		log.Error().Err(err).Str("quic", l.TPUQuic).Str("leader", l.PubKey).Msg("TPUService::PreConnect error")
 		return nil, err
 	}
 
+	tn := time.Now()
 	conn, err := quic.DialAddr(ctx, udpAddr.String(), &tls.Config{
 		InsecureSkipVerify: true,
 		NextProtos:         []string{"solana-tpu"},
@@ -103,7 +108,9 @@ func (s *TPUService) connect(ctx context.Context, l *Leader) (*quic.Conn, error)
 		return nil, err
 	}
 
-	log.Info().Str("quic", l.TPUQuic).Str("leader", l.PubKey).Msgf("TPUService::Connect Dial took: %s", time.Since(tn))
+	rtt := time.Since(tn)
+	log.Info().Str("quic", l.TPUQuic).Str("leader", l.PubKey).Msgf("TPUService::Connect Dial took: %s", rtt)
+	s.observeRTT(l.TPUQuic, rtt)
 
 	stream, err := conn.OpenUniStreamSync(ctx)
 	if err != nil {
@@ -187,6 +194,30 @@ func (s *TPUService) cachedConn(quicEndpoint string) *quic.Conn {
 	}
 
 	return nil
+}
+
+// RTT returns the smoothed QUIC handshake time for a leader, or defaultRTT
+// until one has been measured.
+func (s *TPUService) RTT(l *Leader) time.Duration {
+	s.muRTT.RLock()
+	defer s.muRTT.RUnlock()
+	if rtt, ok := s.rtts[l.TPUQuic]; ok {
+		return rtt
+	}
+	return defaultRTT
+}
+
+func (s *TPUService) observeRTT(quicEndpoint string, sample time.Duration) {
+	if sample <= 0 {
+		return
+	}
+	s.muRTT.Lock()
+	defer s.muRTT.Unlock()
+	if prev, ok := s.rtts[quicEndpoint]; ok {
+		s.rtts[quicEndpoint] = (4*prev + sample) / 5 //EWMA so one slow handshake doesn't dominate
+	} else {
+		s.rtts[quicEndpoint] = sample
+	}
 }
 
 func (s *TPUService) isConnecting(quicEndpoint string) bool {

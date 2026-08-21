@@ -3,14 +3,16 @@
 [![Go Reference](https://pkg.go.dev/badge/github.com/fluxrpc/transaction_sender.svg)](https://pkg.go.dev/github.com/fluxrpc/transaction_sender)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A direct-to-leader transaction sender for Solana-compatible SVM chains. It tracks current and upcoming leaders, preconnects to validator TPU endpoints, and sends serialized transactions over UDP and QUIC.
+A direct-to-leader transaction sender for Solana-compatible SVM chains. It tracks current and upcoming leaders, preconnects to validator TPU endpoints, and sends serialized transactions over UDP and QUIC with RTT-aware leader handoffs.
 
 Development is sponsored and maintained by **[FluxRPC](https://fluxrpc.com)** — Solana & Fogo RPC infrastructure.
 
 - RPC requests, response types, and WebSocket subscriptions are powered by [fluxrpc/solana-go](https://github.com/fluxrpc/solana-go).
 - Current and next-epoch leader schedules are loaded from the configured RPC endpoint.
 - Upcoming QUIC connections are warmed before a leader rotation.
-- Transactions are sent directly to the validator scheduled for the next slot.
+- QUIC handshake RTTs are EWMA-smoothed per validator endpoint.
+- Slot duration is learned from live notifications, with 200ms used only as the startup fallback.
+- The next-slot leader is always targeted; the current leader is also targeted while its estimated one-way delay still fits.
 
 The sender performs no RPC preflight or confirmation. Direct TPU delivery is intended for latency-sensitive callers that already simulate, retry, and confirm their transactions. Delivery through an unstaked connection remains subject to validator SWQoS policy.
 
